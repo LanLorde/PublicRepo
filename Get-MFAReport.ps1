@@ -1,12 +1,50 @@
-﻿Write-Host "Finding Azure Active Directory Accounts..."
+﻿<#
+.SYNOPSIS
+  <Overview of script>
+.DESCRIPTION
+  <Brief description of script>
+.PARAMETER <Parameter_Name>
+    <Brief description of parameter input required. Repeat this attribute if required>
+.INPUTS
+  <Inputs if any, otherwise state None>
+.OUTPUTS
+  <Outputs if any, otherwise state None - example: Log file stored in C:\Windows\Temp\<name>.log>
+.NOTES
+  Version:        1.0
+  Author:         <Name>
+  Creation Date:  <Date>
+  Purpose/Change: Initial script development
+  
+.EXAMPLE
+https://learn.microsoft.com/en-us/powershell/azure/active-directory/install-msonlinev1?source=recommendations&view=azureadps-1.0
+
+  <Example goes here. Repeat this attribute for more than one example>
+#>
+
+
+
+# Tests required Connection and or Installation of MSOnline Module
+
+Try {
+    $MsOn = ((Get-MsolCompanyInformation -ErrorAction Stop | Select-Object InitialDomain).InitialDomain) -split "\." -replace "\." | Select-Object -First 1
+    Write-Host "You're currently connected to"$MsOn" Office 365 Online Module" -BackgroundColor DarkGreen
+  
+  }
+  Catch {
+    Write-Host "You are not connected to any Microsoft Office Online Tenants" -BackgroundColor Red
+    Write-Host "Please login to your Office 365 Tenant"
+    Connect-MsolService
+  }
+
+
+Write-Host "Finding Azure Active Directory Accounts..."
 
 $Users = Get-MsolUser -All | Where-Object { $_.UserType -ne "Guest" -and $_.Enabled -eq "True" }
+
 # Creates Output ojbect list that allows for the creation of an output file
 $Report = [System.Collections.Generic.List[Object]]::new() 
 
 Write-Host "Processing" $Users.Count "accounts..." 
-
-
 
 
 ForEach ($User in $Users) {
