@@ -39,7 +39,7 @@ Try {
 
 Write-Host "Finding Azure Active Directory Accounts..."
 
-$Users = Get-MsolUser -All | Where-Object { $_.UserType -ne "Guest" -and $_.Enabled -eq "True" }
+$Users = Get-MsolUser -All -EnabledFilter EnabledOnly | Where-Object { $_.UserType -ne "Guest" }
 
 # Creates Output ojbect list that allows for the creation of an output file
 $Report = [System.Collections.Generic.List[Object]]::new() 
