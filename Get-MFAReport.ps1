@@ -1,6 +1,6 @@
 ﻿Write-Host "Finding Azure Active Directory Accounts..."
 
-$Users = Get-MsolUser -All | Where-Object { $_.UserType -ne "Guest" }
+$Users = Get-MsolUser -All | Where-Object { $_.UserType -ne "Guest" -and $_.Enabled -eq "True" }
 # Creates Output ojbect list that allows for the creation of an output file
 $Report = [System.Collections.Generic.List[Object]]::new() 
 
