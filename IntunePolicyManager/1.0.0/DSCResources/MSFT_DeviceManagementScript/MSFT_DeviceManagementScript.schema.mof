@@ -1,6 +1,0 @@
-[ClassVersion("1.0.0"), FriendlyName("DeviceManagementScript")]
-class MSFT_DeviceManagementScript : OMI_BaseResource
-{
-    [Key] string PolicyPath;
-    [Write, ValueMap{"Present"}, Values{"Present"}] string Ensure;
-};

@@ -1,6 +1,0 @@
-[ClassVersion("1.0.0"), FriendlyName("CompliancePolicy")]
-class MSFT_CompliancePolicy : OMI_BaseResource
-{
-    [Key] string PolicyPath;
-    [Write, ValueMap{"Present"}, Values{"Present"}] string Ensure;
-};

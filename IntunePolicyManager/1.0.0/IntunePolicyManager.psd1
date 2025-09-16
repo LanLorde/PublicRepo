@@ -5,6 +5,6 @@
     Author = 'ChatGPT'
     Description = 'Unified module for managing Intune and Conditional Access policies using PowerShell DSC and Graph API.'
     PowerShellVersion = '5.1'
-    FunctionsToExport = '*'
+    FunctionsToExport = @('Export-IntunePolicies', 'New-AllIntunePolicyDSCConfig')
     DscResourcesToExport = @('MSFT_IntunePolicy', 'MSFT_ConditionalAccessPolicy', 'MSFT_CompliancePolicy', 'MSFT_DeviceManagementScript')
 }
