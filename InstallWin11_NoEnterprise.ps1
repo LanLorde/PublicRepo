@@ -23,6 +23,8 @@ Invoke-WebRequest -Uri $url -OutFile $file
 Start-Process -FilePath $file -ArgumentList "/Install /QuietInstall /SkipEULA" -verb RunAs
 #>
 
+### Above are previously working PoCs that have since stopped working. ###
+
 # Directory where Windows upgrade assistant exe will be downloaded.
 
 $dir = 'C:\temp\24H2'
