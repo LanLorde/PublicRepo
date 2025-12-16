@@ -26,5 +26,3 @@ function Invoke-PublicRepoScript {
         Write-Host "Could not find $Name, check the spelling and its availability in the public repo" -ForegroundColor Cyan
     }
 }
-
-Import-Module ~\documents\SpotMigration\Temp\GitHub-Run.ps1
