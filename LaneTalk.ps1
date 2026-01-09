@@ -90,45 +90,64 @@ function Get-LaneTalkCenterStatus {
         "https://api.lanetalk.com/v1/bowlingcenters/$centerId/web_center_live_scoring"
     )
 
+    function Invoke-LaneTalkApi-Variant {
+        param(
+            [Parameter(Mandatory)][string]$Uri,
+            [Parameter(Mandatory)][ValidateSet('apikey','apiKey')][string]$HeaderName
+        )
+
+        $headers = @{
+            $HeaderName = $script:LaneTalkApiKey
+            accept      = "application/json"
+            origin      = "https://livescores.lanetalk.com"
+            referer     = "https://livescores.lanetalk.com/"
+        }
+
+        Invoke-RestMethod -Method GET -Uri $Uri -Headers $headers -TimeoutSec 30
+    }
+
     $data = $null
     $current = $null
     $urlUsed = $null
     $lastError = $null
 
     foreach ($u in $candidates) {
-        try {
-            $data = Invoke-LaneTalkApi -Uri $u -Method GET
-            if (-not $data) { continue }
+        foreach ($hn in @('apikey','apiKey')) {
+            try {
+                $data = Invoke-LaneTalkApi-Variant -Uri $u -HeaderName $hn
+                if (-not $data) { continue }
 
-            # Normalize common shapes we have seen from the web app.
-            $candidateCurrent = $null
-            if ($data.state -and $data.state.current) {
-                $candidateCurrent = $data.state.current
-            } elseif ($data.current) {
-                $candidateCurrent = $data.current
-            } else {
-                $candidateCurrent = $data
-            }
-
-            # Sanity check: some endpoints report a weird "activeGames" that can exceed lanes.
-            # If that happens, keep trying other endpoints.
-            if ($null -ne $candidateCurrent -and $null -ne $candidateCurrent.lanes -and $null -ne $candidateCurrent.activeGames) {
-                try {
-                    if ([int]$candidateCurrent.activeGames -gt [int]$candidateCurrent.lanes) {
-                        continue
-                    }
-                } catch {
-                    # if parsing fails, accept it
+                # Normalize common shapes we have seen from the web app.
+                $candidateCurrent = $null
+                if ($data.state -and $data.state.current) {
+                    $candidateCurrent = $data.state.current
+                } elseif ($data.current) {
+                    $candidateCurrent = $data.current
+                } else {
+                    $candidateCurrent = $data
                 }
-            }
 
-            $current = $candidateCurrent
-            $urlUsed = $u
-            break
-        } catch {
-            $lastError = $_
-            continue
+                # Sanity check: some endpoints report a weird "activeGames" that can exceed lanes.
+                # If that happens, keep trying other endpoints.
+                if ($null -ne $candidateCurrent -and $null -ne $candidateCurrent.lanes -and $null -ne $candidateCurrent.activeGames) {
+                    try {
+                        if ([int]$candidateCurrent.activeGames -gt [int]$candidateCurrent.lanes) {
+                            continue
+                        }
+                    } catch {
+                        # if parsing fails, accept it
+                    }
+                }
+
+                $current = $candidateCurrent
+                $urlUsed = "$u (header=$hn)"
+                break
+            } catch {
+                $lastError = $_
+                continue
+            }
         }
+        if ($current) { break }
     }
 
     $script:LaneTalkCenterStatusCache = [pscustomobject]@{
@@ -774,20 +793,16 @@ function Get-LaneTalkLatestGameIdForPlayer {
 
 
 function Start-LaneTalkMenu {
-    $script:LaneTalk_MenuIter = 0
     while ($true) {
         Write-Host ""
-        $script:LaneTalk_MenuIter++
-        Write-Host ("[LaneTalk] Menu render #{0} @ {1:HH:mm:ss}" -f $script:LaneTalk_MenuIter, (Get-Date)) -ForegroundColor DarkGray
         Write-Host "LaneTalk" -ForegroundColor Cyan
 
         $center = $null
-        try { $center = Get-LaneTalkCenterStatus -CacheSeconds 60 } catch { }
+        try { $center = Get-LaneTalkCenterStatus -CacheSeconds 300 -Quiet } catch { $center = $null }
 
         Write-Host "CenterId: $($script:LaneTalkCenterId)" -ForegroundColor DarkCyan
 
         if ($center) {
-            # Print what we have without assuming every property exists
             $name = $center.companyName
             if (-not $name) { $name = $center.name }
             if ($name) { Write-Host ("Center:  {0}" -f $name) -ForegroundColor DarkCyan }
@@ -797,11 +812,11 @@ function Start-LaneTalkMenu {
                 $parts = @($center.city, $center.state)
                 $loc = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ", ")
             }
-            if ($loc) { Write-Host ("Location:{0,2}{1}" -f "", $loc) -ForegroundColor DarkCyan }
+            if ($loc) { Write-Host ("Location: {0}" -f $loc) -ForegroundColor DarkCyan }
 
             if ($null -ne $center.lanes) { Write-Host ("Lanes:   {0}" -f $center.lanes) -ForegroundColor DarkCyan }
 
-            # Active games: trust center.activeGames only if it looks sane (<= lanes). Otherwise fall back to a "recent" count.
+            # Active games: trust center.activeGames only if it looks sane (<= lanes). Otherwise show a recent proxy.
             $activeOk = $false
             $active = $null
             if ($null -ne $center.activeGames -and $null -ne $center.lanes) {
@@ -817,9 +832,7 @@ function Start-LaneTalkMenu {
                 try {
                     $recent = (Get-LaneTalkCompleted -Page 1 | Measure-Object).Count
                     Write-Host ("Recent:  {0} (completed page 1)" -f $recent) -ForegroundColor DarkCyan
-                } catch {
-                    # nothing
-                }
+                } catch { }
             }
 
             if ($center.postalCode) { Write-Host ("Postal:  {0}" -f $center.postalCode) -ForegroundColor DarkCyan }
@@ -829,14 +842,11 @@ function Start-LaneTalkMenu {
         Write-Host ""
         Write-Host " 1) One-shot scoreboard (Page 1)"
         Write-Host " 2) Search bowler and pick a game (scoreboard)"
-        Write-Host " 5) Export Page 1 (playerName,lane,gameScores) to CSV"
+        Write-Host " 3) Export Page 1 (playerName,lane,gameScores) to CSV"
         Write-Host " 0) Exit"
         Write-Host ""
 
-        Write-Host "" 
-        Write-Host "Select an option and press Enter..." -ForegroundColor DarkGray
         $choice = Read-Host "Select option"
-        Write-Host ("[LaneTalk] You entered: {0}" -f $choice) -ForegroundColor DarkGray
         switch ($choice) {
             "1" { Show-LaneTalkHydratedScoreboardOnce -Page 1 -SleepMs 25 -MaxGames 5000 }
             "2" {
@@ -847,7 +857,7 @@ function Start-LaneTalkMenu {
                     Show-LaneTalkPlayerGamePicker -Search $search
                 }
             }
-            "5" {
+            "3" {
                 $default = Join-Path $PWD "lanetalk_page1_player_lane_gamescores.csv"
                 $path = Read-Host "CSV output path (Enter for default: $default)"
                 if ([string]::IsNullOrWhiteSpace($path)) { $path = $default }
