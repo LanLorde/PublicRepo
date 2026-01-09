@@ -774,8 +774,11 @@ function Get-LaneTalkLatestGameIdForPlayer {
 
 
 function Start-LaneTalkMenu {
+    $script:LaneTalk_MenuIter = 0
     while ($true) {
         Write-Host ""
+        $script:LaneTalk_MenuIter++
+        Write-Host ("[LaneTalk] Menu render #{0} @ {1:HH:mm:ss}" -f $script:LaneTalk_MenuIter, (Get-Date)) -ForegroundColor DarkGray
         Write-Host "LaneTalk" -ForegroundColor Cyan
 
         $center = $null
@@ -830,7 +833,10 @@ function Start-LaneTalkMenu {
         Write-Host " 0) Exit"
         Write-Host ""
 
+        Write-Host "" 
+        Write-Host "Select an option and press Enter..." -ForegroundColor DarkGray
         $choice = Read-Host "Select option"
+        Write-Host ("[LaneTalk] You entered: {0}" -f $choice) -ForegroundColor DarkGray
         switch ($choice) {
             "1" { Show-LaneTalkHydratedScoreboardOnce -Page 1 -SleepMs 25 -MaxGames 5000 }
             "2" {
