@@ -126,19 +126,6 @@ function Get-LaneTalkCenterStatus {
                 } else {
                     $candidateCurrent = $data
                 }
-
-                # Sanity check: some endpoints report a weird "activeGames" that can exceed lanes.
-                # If that happens, keep trying other endpoints.
-                if ($null -ne $candidateCurrent -and $null -ne $candidateCurrent.lanes -and $null -ne $candidateCurrent.activeGames) {
-                    try {
-                        if ([int]$candidateCurrent.activeGames -gt [int]$candidateCurrent.lanes) {
-                            continue
-                        }
-                    } catch {
-                        # if parsing fails, accept it
-                    }
-                }
-
                 $current = $candidateCurrent
                 $urlUsed = "$u (header=$hn)"
                 break
@@ -800,40 +787,18 @@ function Start-LaneTalkMenu {
         $center = $null
         try { $center = Get-LaneTalkCenterStatus -CacheSeconds 300 -Quiet } catch { $center = $null }
 
-        Write-Host "CenterId: $($script:LaneTalkCenterId)" -ForegroundColor DarkCyan
+        # CenterId is internal-only; don't print it.
 
         if ($center) {
             $name = $center.companyName
             if (-not $name) { $name = $center.name }
             if ($name) { Write-Host ("Center:  {0}" -f $name) -ForegroundColor DarkCyan }
 
-            $loc = $center.location
-            if (-not $loc) {
-                $parts = @($center.city, $center.state)
-                $loc = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ", ")
-            }
-            if ($loc) { Write-Host ("Location: {0}" -f $loc) -ForegroundColor DarkCyan }
+            if ($center.address) { Write-Host ("Address: {0}" -f $center.address) -ForegroundColor DarkCyan }
+            if ($center.url)     { Write-Host ("URL:     {0}" -f $center.url) -ForegroundColor DarkCyan }
 
             if ($null -ne $center.lanes) { Write-Host ("Lanes:   {0}" -f $center.lanes) -ForegroundColor DarkCyan }
-
-            # Active games: trust center.activeGames only if it looks sane (<= lanes). Otherwise show a recent proxy.
-            $activeOk = $false
-            $active = $null
-            if ($null -ne $center.activeGames -and $null -ne $center.lanes) {
-                try {
-                    $active = [int]$center.activeGames
-                    if ($active -le [int]$center.lanes) { $activeOk = $true }
-                } catch { }
-            }
-
-            if ($activeOk) {
-                Write-Host ("Active:  {0}" -f $active) -ForegroundColor DarkCyan
-            } else {
-                try {
-                    $recent = (Get-LaneTalkCompleted -Page 1 | Measure-Object).Count
-                    Write-Host ("Recent:  {0} (completed page 1)" -f $recent) -ForegroundColor DarkCyan
-                } catch { }
-            }
+            if ($null -ne $center.activePlayers) { Write-Host ("Players: {0}" -f $center.activePlayers) -ForegroundColor DarkCyan }
 
             if ($center.postalCode) { Write-Host ("Postal:  {0}" -f $center.postalCode) -ForegroundColor DarkCyan }
             if ($center.country)    { Write-Host ("Country: {0}" -f $center.country) -ForegroundColor DarkCyan }
