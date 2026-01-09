@@ -1,4 +1,4 @@
-# =========================
+﻿# =========================
 # LaneTalk
 # =========================
 
@@ -173,7 +173,8 @@ function Format-LaneTalkScoreboard {
     $scores = $scores | ForEach-Object { if ($null -eq $_) { "" } else { [string]$_ } }
 
     function Convert-LaneTalkThrow([string]$t) {
-        $t = ($t ?? "").Trim()
+        if ($null -eq $t) { $t = "" }
+        $t = $t.Trim()
         if ($t -eq "") { return "" }
         if ($t -eq "0") { return "-" }   # gutter / miss
         return $t
