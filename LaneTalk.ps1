@@ -640,59 +640,82 @@ function Show-LaneTalkHydratedScoreboardOnce {
         Format-Table -AutoSize
 }
 
-function Export-LaneTalkPage1PlayerLaneGameScoresToCsv {
+function Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv {
     [CmdletBinding()]
     param(
-        [string]$Path = (Join-Path $PWD "lanetalk_page1_player_lane_gamescores.csv"),
+        [string]$Path = (Join-Path $PWD "lanetalk_last10pages_player_lane_gamescores.csv"),
+
+        # Safety valve: maximum pages to scan (API is newest-first)
+        [int]$MaxPages = 10,
+
+        # Throttle per game-detail request
         [int]$SleepMs = 25,
-        [int]$MaxGames = 5000
+
+        # Safety valve: max game-detail calls across the whole export
+        [int]$MaxGames = 20000
     )
 
-    $completed = Get-LaneTalkCompleted -Page 1
-    if (-not $completed) {
-        Write-Warning "No results returned from /completed/1"
-        return
-    }
-
     $gameCounter = 0
+    $rows = New-Object System.Collections.Generic.List[object]
 
-    $rows = foreach ($c in $completed) {
-        $ids = @()
-        if ($c.gameIds) { $ids = @($c.gameIds) }
-
-        # Collect lane(s) for that player's games
-        $lanes = New-Object System.Collections.Generic.List[string]
-
-        foreach ($gid in $ids) {
-            $gameCounter++
-            if ($gameCounter -gt $MaxGames) {
-                throw "MaxGames limit hit ($MaxGames). Bailing to avoid hammering the API."
-            }
-
-            try {
-                $g = Get-LaneTalkGameDetail -GameId ([long]$gid)
-                if ($null -ne $g.lane -and "$($g.lane)".Length -gt 0) {
-                    $lanes.Add([string]$g.lane) | Out-Null
-                }
-            } catch {
-                # ignore lane fetch failures for export
-            }
-
-            if ($SleepMs -gt 0) { Start-Sleep -Milliseconds $SleepMs }
+    for ($page = 1; $page -le $MaxPages; $page++) {
+        $completed = Get-LaneTalkCompleted -Page $page
+        if (-not $completed -or ($completed | Measure-Object).Count -eq 0) {
+            break
         }
 
-        # De-dupe lanes (some games may be same lane)
-        $laneText = ($lanes | Select-Object -Unique) -join ","
+        foreach ($c in $completed) {
+            $ids = @()
+            if ($c.gameIds) { $ids = @($c.gameIds) }
 
-        [pscustomobject]@{
-            playerName = $c.playerName
-            lane       = $laneText
-            gameScores = if ($c.gameScores) { @($c.gameScores) -join "," } else { "" }
+            # Collect lane(s) for that player's games
+            $lanes = New-Object System.Collections.Generic.List[string]
+
+            foreach ($gid in $ids) {
+                $gameCounter++
+                if ($gameCounter -gt $MaxGames) {
+                    throw "MaxGames limit hit ($MaxGames). Bailing to avoid hammering the API."
+                }
+
+                try {
+                    $g = Get-LaneTalkGameDetail -GameId ([long]$gid)
+                    if ($null -ne $g.lane -and "$($g.lane)".Length -gt 0) {
+                        $lanes.Add([string]$g.lane) | Out-Null
+                    }
+                } catch {
+                    # ignore lane fetch failures for export
+                }
+
+                if ($SleepMs -gt 0) { Start-Sleep -Milliseconds $SleepMs }
+            }
+
+            # De-dupe lanes (some games may be same lane)
+            $laneText = ($lanes | Select-Object -Unique) -join ","
+
+            $rows.Add([pscustomobject]@{
+                playerName = $c.playerName
+                lane       = $laneText
+                gameScores = if ($c.gameScores) { @($c.gameScores) -join "," } else { "" }
+                page       = $page
+            }) | Out-Null
         }
     }
 
     $rows | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $Path
-    Write-Host "Exported to: $Path" -ForegroundColor Green
+    Write-Host ("Exported last {0} completed page(s) to: {1}" -f $MaxPages, $Path) -ForegroundColor Green
+}
+
+# Back-compat wrapper (old name) — now exports all pages
+function Export-LaneTalkPage1PlayerLaneGameScoresToCsv {
+    [CmdletBinding()]
+    param(
+        [string]$Path = (Join-Path $PWD "lanetalk_allpages_player_lane_gamescores.csv"),
+        [int]$MaxPages = 200,
+        [int]$SleepMs = 25,
+        [int]$MaxGames = 20000
+    )
+
+    Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv -Path $Path -MaxPages $MaxPages -SleepMs $SleepMs -MaxGames $MaxGames
 }
 
 function Format-LaneTalkFrames {
@@ -808,7 +831,7 @@ function Start-LaneTalkMenu {
         Write-Host ""
         Write-Host " 1) One-shot scoreboard (Page 1)"
         Write-Host " 2) Search bowler and pick a game (scoreboard)"
-        Write-Host " 3) Export Page 1 (playerName,lane,gameScores) to CSV"
+        Write-Host " 3) Export last 10 pages (playerName,lane,gameScores) to CSV"
         Write-Host " 0) Exit"
         Write-Host ""
 
@@ -824,11 +847,12 @@ function Start-LaneTalkMenu {
                 }
             }
             "3" {
-                $default = Join-Path $PWD "lanetalk_page1_player_lane_gamescores.csv"
+                $default = Join-Path $PWD "lanetalk_last10pages_player_lane_gamescores.csv"
                 $path = Read-Host "CSV output path (Enter for default: $default)"
                 if ([string]::IsNullOrWhiteSpace($path)) { $path = $default }
 
-                Export-LaneTalkPage1PlayerLaneGameScoresToCsv -Path $path -SleepMs 25 -MaxGames 5000
+                # Default: last 10 pages. Advanced users can edit MaxPages in the script if needed.
+                Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv -Path $path -MaxPages 10 -SleepMs 25 -MaxGames 20000
             }
             "0" { return }
             default { Write-Warning "Unknown option: $choice" }
