@@ -3,10 +3,12 @@
     Exports LaneTalk completed-game data for a bowling center into a flat CSV suitable for Excel/VBA ingestion.
 
 .DESCRIPTION
-    - Pulls /completed/<page> from LaneTalk for a configurable number of pages (newest-first).
+    - Pulls /completed/<page> from LaneTalk (newest-first).
+    - Intended for frequent polling/automation, so defaults to pulling ONLY page 1.
     - Filters to a lane range (default 23-38).
     - Produces one game score per column (Game1, Game2, ...).
     - Uses the first gameId in each completed row to resolve the lane via the game-detail endpoint.
+    - Includes hard stop controls (MaxRunMinutes / MaxCompletedRows / MaxGameDetailCalls) so it cannot run forever.
 
 .NOTES
     - Designed for automation (no menu / no prompts).
@@ -18,11 +20,12 @@ param(
     # Bowling center UUID
     [Parameter()][string]$CenterId = "eb0f0b49-b676-430a-9a69-86bf9638b6b1",
 
-    # LaneTalk API key
-    [Parameter()][string]$ApiKey   = "",
+    # LaneTalk API key (INTENTIONALLY hardcoded by request — do not remove)
+    [Parameter()][string]$ApiKey   = "8tLtPc8UwWvdvbpzRIr0ifCWy250TXUXrGUn",
 
     # How many /completed pages to pull (page 1 is newest)
-    [Parameter()][ValidateRange(1,500)][int]$Pages = 10,
+    # Default is 1 because this script is typically run repeatedly.
+    [Parameter()][ValidateRange(1,500)][int]$Pages = 1,
 
     # Only keep lanes in this inclusive range
     [Parameter()][ValidateRange(1,200)][int]$MinLane = 23,
@@ -38,13 +41,44 @@ param(
     [Parameter()][ValidateRange(0,2000)][int]$SleepMs = 25,
 
     # Safety valve: maximum game-detail calls total
-    [Parameter()][ValidateRange(1,200000)][int]$MaxGameDetailCalls = 20000
+    [Parameter()][ValidateRange(1,200000)][int]$MaxGameDetailCalls = 20000,
+
+    # Hard stop: maximum total completed rows to process (pre-filter). Prevents giant exports.
+    [Parameter()][ValidateRange(1,2000000)][int]$MaxCompletedRows = 25000,
+
+    # Hard stop: maximum wall-clock runtime in minutes.
+    [Parameter()][ValidateRange(1,1440)][int]$MaxRunMinutes = 15,
+
+    # Timeout (seconds) for each HTTP request
+    [Parameter()][ValidateRange(5,120)][int]$HttpTimeoutSec = 30
 )
 
 Set-StrictMode -Version 2
 
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-    throw "ApiKey is required. Pass -ApiKey '<key>'"
+    throw "ApiKey is required."
+}
+
+$script:Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+function Test-StopConditions {
+    param(
+        [int]$GameDetailCalls,
+        [int]$SeenCompletedRows,
+        [int]$CurrentPage
+    )
+
+    if ($script:Stopwatch.Elapsed.TotalMinutes -ge $MaxRunMinutes) {
+        throw "MaxRunMinutes hit ($MaxRunMinutes). Stopping at page $CurrentPage."
+    }
+
+    if ($SeenCompletedRows -ge $MaxCompletedRows) {
+        throw "MaxCompletedRows hit ($MaxCompletedRows). Stopping at page $CurrentPage."
+    }
+
+    if ($GameDetailCalls -ge $MaxGameDetailCalls) {
+        throw "MaxGameDetailCalls hit ($MaxGameDetailCalls). Stopping at page $CurrentPage."
+    }
 }
 
 function Invoke-LaneTalkApi {
@@ -68,10 +102,10 @@ function Invoke-LaneTalkApi {
 
     if ($Method -eq 'POST') {
         $json = $Body | ConvertTo-Json -Depth 30
-        return Invoke-RestMethod -Method POST -Uri $Uri -Headers $Headers -Body $json -ContentType 'application/json' -TimeoutSec 30
+        return Invoke-RestMethod -Method POST -Uri $Uri -Headers $Headers -Body $json -ContentType 'application/json' -TimeoutSec $HttpTimeoutSec
     }
 
-    return Invoke-RestMethod -Method GET -Uri $Uri -Headers $Headers -TimeoutSec 30
+    return Invoke-RestMethod -Method GET -Uri $Uri -Headers $Headers -TimeoutSec $HttpTimeoutSec
 }
 
 function Get-LaneTalkCompleted {
@@ -86,6 +120,7 @@ function Get-LaneTalkGameDetail {
     [CmdletBinding()]
     param([Parameter(Mandatory)][long]$GameId)
 
+    # We keep candidates because LaneTalk has varied deployments; BUT we enforce timeouts so it can't hang.
     $headers = @{
         apiKey  = $ApiKey
         accept  = 'application/json'
@@ -104,7 +139,7 @@ function Get-LaneTalkGameDetail {
 
     foreach ($u in $candidates) {
         try {
-            return Invoke-RestMethod -Method GET -Uri $u -Headers $headers -ErrorAction Stop
+            return Invoke-RestMethod -Method GET -Uri $u -Headers $headers -TimeoutSec $HttpTimeoutSec -ErrorAction Stop
         } catch {
             # keep trying
         }
@@ -125,10 +160,15 @@ $gameCols = New-GameColumns -Count $MaxGameColumns
 # Cache to avoid re-fetching same gameId repeatedly
 $laneByGameId = @{}
 $gameDetailCalls = 0
+$seenCompletedRows = 0
 
 $results = New-Object System.Collections.Generic.List[object]
 
 for ($page = 1; $page -le $Pages; $page++) {
+    Test-StopConditions -GameDetailCalls $gameDetailCalls -SeenCompletedRows $seenCompletedRows -CurrentPage $page
+
+    Write-Progress -Activity "LaneTalk Export" -Status ("Pulling completed page {0}/{1} (elapsed {2:n1}m)" -f $page, $Pages, $script:Stopwatch.Elapsed.TotalMinutes) -PercentComplete ([int](($page / [double]$Pages) * 100))
+
     $completed = $null
     try {
         $completed = Get-LaneTalkCompleted -Page $page
@@ -137,11 +177,15 @@ for ($page = 1; $page -le $Pages; $page++) {
         continue
     }
 
+    # If endpoint returns empty, we're done.
     if (-not $completed -or ($completed | Measure-Object).Count -eq 0) {
         break
     }
 
     foreach ($c in $completed) {
+        $seenCompletedRows++
+        Test-StopConditions -GameDetailCalls $gameDetailCalls -SeenCompletedRows $seenCompletedRows -CurrentPage $page
+
         # Resolve lane from first gameId (completed row is a series)
         $ids = @()
         if ($c.gameIds) { $ids = @($c.gameIds) }
@@ -154,9 +198,7 @@ for ($page = 1; $page -le $Pages; $page++) {
             $lane = $laneByGameId[$firstId]
         } else {
             $gameDetailCalls++
-            if ($gameDetailCalls -gt $MaxGameDetailCalls) {
-                throw "MaxGameDetailCalls limit hit ($MaxGameDetailCalls)."
-            }
+            Test-StopConditions -GameDetailCalls $gameDetailCalls -SeenCompletedRows $seenCompletedRows -CurrentPage $page
 
             try {
                 $g = Get-LaneTalkGameDetail -GameId $firstId
@@ -197,8 +239,12 @@ for ($page = 1; $page -le $Pages; $page++) {
     }
 }
 
+Write-Progress -Activity "LaneTalk Export" -Completed
+
 # Sort for easier Excel processing: lane, then player
 $sorted = $results | Sort-Object lane, playerName
 
 $sorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $OutPath
+
 Write-Host ("Wrote {0} row(s) to {1}" -f ($sorted | Measure-Object).Count, $OutPath) -ForegroundColor Green
+Write-Host ("Stats: PagesRequested={0} SeenCompletedRows={1} GameDetailCalls={2} Elapsed={3:n1}m" -f $Pages, $seenCompletedRows, $gameDetailCalls, $script:Stopwatch.Elapsed.TotalMinutes)

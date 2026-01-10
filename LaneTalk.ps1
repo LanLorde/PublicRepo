@@ -408,7 +408,7 @@ function Show-LaneTalkPlayerGamePicker {
     )
 
     # 1) Resolve the player to a single bowler
-    $players = Find-LaneTalkPlayers -Query $Search -MaxPages $SearchPages
+    $players = @(Find-LaneTalkPlayers -Query $Search -MaxPages $SearchPages)
 
     if (-not $players -or $players.Count -eq 0) {
         Write-Warning "No bowlers matched '$Search' in the last $SearchPages page(s)."
@@ -456,87 +456,126 @@ function Show-LaneTalkPlayerGamePicker {
             break
         }
     }
-
     # 2) Pull game ids for that exact player name
-    $gameIds = @(Get-LaneTalkPlayerGameIds -PlayerName $playerName -MaxPages $GamesPages)
+    $allGameIds = @(Get-LaneTalkPlayerGameIds -PlayerName $playerName -MaxPages $GamesPages)
 
-    if (-not $gameIds -or $gameIds.Count -eq 0) {
+    if (-not $allGameIds -or $allGameIds.Count -eq 0) {
         Write-Warning "No games found for '$playerName' in the last $GamesPages completed page(s)."
         return
     }
 
-    if ($MaxListGames -gt 0 -and $gameIds.Count -gt $MaxListGames) {
-        $gameIds = $gameIds[0..($MaxListGames - 1)]
-    }
+    # We start by listing up to MaxListGames, but allow 'm' to show more and 'a' to show all.
+    $listCount = if ($MaxListGames -gt 0) { [Math]::Min($MaxListGames, $allGameIds.Count) } else { $allGameIds.Count }
 
-    # 3) Show options (light metadata per game)
-    $options = New-Object System.Collections.Generic.List[object]
+    function Build-LaneTalkGameOptions {
+        param([long[]]$Ids)
 
-    Write-Host ""; Write-Host ("Games for: {0}" -f $playerName) -ForegroundColor Cyan
+        $opts = New-Object System.Collections.Generic.List[object]
 
-    for ($i = 0; $i -lt $gameIds.Count; $i++) {
-        $gid = $gameIds[$i]
-        try {
-            $g = Get-LaneTalkGameDetail -GameId $gid
+        Write-Host ""; Write-Host ("Games for: {0}  (showing {1}/{2})" -f $playerName, $Ids.Count, $allGameIds.Count) -ForegroundColor Cyan
 
-            $startLocal = $null
-            if ($g.startTime) { $startLocal = Convert-FromUnixTime -UnixSeconds ([long]$g.startTime) }
+        for ($i = 0; $i -lt $Ids.Count; $i++) {
+            $gid = $Ids[$i]
+            try {
+                $g = Get-LaneTalkGameDetail -GameId $gid
 
-            $finalScore = $null
-            if ($g.scores) { $finalScore = ($g.scores | Select-Object -Last 1) }
-            if ($null -eq $finalScore) { $finalScore = $g.score }
+                $startLocal = $null
+                if ($g.startTime) { $startLocal = Convert-FromUnixTime -UnixSeconds ([long]$g.startTime) }
 
-            $options.Add([pscustomobject]@{
-                Index = ($i + 1)
-                GameId = $g.id
-                GameNo = $g.game
-                Lane   = $g.lane
-                When   = $startLocal
-                Score  = $finalScore
-                Raw    = $g
-            }) | Out-Null
+                $finalScore = $null
+                if ($g.scores) { $finalScore = ($g.scores | Select-Object -Last 1) }
+                if ($null -eq $finalScore) { $finalScore = $g.score }
 
-            $whenText = if ($startLocal) { (Get-Date $startLocal -Format "MM/dd HH:mm") } else { "" }
-            Write-Host (" {0,2}) G{1}  Lane {2}  Score {3}  {4}  (GameId {5})" -f ($i + 1), $g.game, $g.lane, $finalScore, $whenText, $g.id)
-        } catch {
-            Write-Host (" {0,2}) (GameId {1} failed to load)" -f ($i + 1), $gid) -ForegroundColor DarkYellow
-        }
-    }
+                $opts.Add([pscustomobject]@{
+                    Index  = ($i + 1)
+                    GameId = $g.id
+                    GameNo = $g.game
+                    Lane   = $g.lane
+                    When   = $startLocal
+                    Score  = $finalScore
+                    Raw    = $g
+                }) | Out-Null
 
-    Write-Host ""
-
-    # Auto-select if there's only one game in the list
-    if ($options.Count -eq 1) {
-        $chosen = $options[0]
-    } else {
-        $selText = Read-Host "Pick a game number to display (or 0 to cancel)"
-        $sel = 0
-        if (-not [int]::TryParse($selText, [ref]$sel)) {
-            Write-Warning "Invalid selection."
-            return
+                $whenText = if ($startLocal) { (Get-Date $startLocal -Format "MM/dd HH:mm") } else { "" }
+                Write-Host (" {0,2}) G{1}  Lane {2}  Score {3}  {4}  (GameId {5})" -f ($i + 1), $g.game, $g.lane, $finalScore, $whenText, $g.id)
+            } catch {
+                Write-Host (" {0,2}) (GameId {1} failed to load)" -f ($i + 1), $gid) -ForegroundColor DarkYellow
+            }
         }
 
-        if ($sel -eq 0) { return }
-        if ($sel -lt 1 -or $sel -gt $options.Count) {
-            Write-Warning "Invalid selection."
-            return
-        }
-
-        $chosen = $options[$sel - 1]
+        return $opts
     }
 
-    Write-Host ""
-    Write-Host "LaneTalk - Game Scoreboard" -ForegroundColor Cyan
-    Write-Host ("Player: {0}" -f $chosen.Raw.playerName) -ForegroundColor Yellow
-    if ($chosen.Raw.teamName) { Write-Host ("Team:   {0}" -f $chosen.Raw.teamName) }
-    Write-Host ("GameId:  {0}  (G{1}  Lane {2})" -f $chosen.GameId, $chosen.GameNo, $chosen.Lane)
-    if ($chosen.When) { Write-Host ("When:   {0:MM/dd/yyyy HH:mm}" -f $chosen.When) }
-    if ($null -ne $chosen.Score) { Write-Host ("Score:  {0}" -f $chosen.Score) -ForegroundColor Green }
-    Write-Host ""
+    function Show-LaneTalkGameScoreboardFromOption {
+        param([Parameter(Mandatory)][object]$Opt)
 
-    $sb = Format-LaneTalkScoreboard -Game $chosen.Raw
-    Write-Host $sb
+        Write-Host ""
+        Write-Host "LaneTalk - Game Scoreboard" -ForegroundColor Cyan
+        Write-Host ("Player: {0}" -f $Opt.Raw.playerName) -ForegroundColor Yellow
+        if ($Opt.Raw.teamName) { Write-Host ("Team:   {0}" -f $Opt.Raw.teamName) }
+        Write-Host ("GameId:  {0}  (G{1}  Lane {2})" -f $Opt.GameId, $Opt.GameNo, $Opt.Lane)
+        if ($Opt.When) { Write-Host ("When:   {0:MM/dd/yyyy HH:mm}" -f $Opt.When) }
+        if ($null -ne $Opt.Score) { Write-Host ("Score:  {0}" -f $Opt.Score) -ForegroundColor Green }
+        Write-Host ""
+
+        $sb = Format-LaneTalkScoreboard -Game $Opt.Raw
+        Write-Host $sb
+    }
+
+    while ($true) {
+        $idsToShow = @($allGameIds[0..($listCount - 1)])
+        $options = Build-LaneTalkGameOptions -Ids $idsToShow
+
+        Write-Host ""
+
+        if ($options.Count -eq 1) {
+            # Only one game in list — just show it, then ask if they want to go again.
+            Show-LaneTalkGameScoreboardFromOption -Opt $options[0]
+        } else {
+            $prompt = "Pick game # (a=all, m=more, 0=back)"
+            $selText = Read-Host $prompt
+
+            if ($selText -eq "0") { return }
+
+            if ($selText -match "^[Aa]$") {
+                Write-Host ""
+                Write-Host ("Showing ALL {0} games loaded..." -f $options.Count) -ForegroundColor Cyan
+                for ($i = 0; $i -lt $options.Count; $i++) {
+                    Write-Host ""
+                    Write-Host ("==== {0}/{1} ====" -f ($i + 1), $options.Count) -ForegroundColor DarkCyan
+                    Show-LaneTalkGameScoreboardFromOption -Opt $options[$i]
+                }
+            } elseif ($selText -match "^[Mm]$") {
+                if ($listCount -ge $allGameIds.Count) {
+                    Write-Host "Already showing all games available in this scan." -ForegroundColor DarkYellow
+                } else {
+                    $listCount = [Math]::Min($allGameIds.Count, $listCount + $MaxListGames)
+                }
+                continue
+            } else {
+                $sel = 0
+                if (-not [int]::TryParse($selText, [ref]$sel)) {
+                    Write-Warning "Invalid selection."
+                    continue
+                }
+
+                if ($sel -lt 1 -or $sel -gt $options.Count) {
+                    Write-Warning "Invalid selection."
+                    continue
+                }
+
+                $chosen = $options[$sel - 1]
+                Show-LaneTalkGameScoreboardFromOption -Opt $chosen
+            }
+        }
+
+        Write-Host ""
+        $again = Read-Host "Show another game? (y/n)"
+        if ($again -match "^[Yy]$") { continue }
+        return
+    }
 }
+
 
 
 
@@ -572,150 +611,6 @@ function Get-LaneTalkGameDetail {
     }
 
     throw "No candidate game-detail endpoints returned 200 for GameId=$GameId"
-}
-
-function Show-LaneTalkHydratedScoreboardOnce {
-    [CmdletBinding()]
-    param(
-        [int]$Page = 1,
-        [int]$SleepMs = 25,
-        [int]$MaxGames = 5000
-    )
-
-    $completed = Get-LaneTalkCompleted -Page $Page
-    if (-not $completed) {
-        Write-Warning "No results returned from /completed/$Page"
-        return
-    }
-
-    $gameCounter = 0
-
-    $rows = foreach ($c in $completed) {
-        $ids = @()
-        if ($c.gameIds) { $ids = @($c.gameIds) }
-
-        $laneGames = New-Object System.Collections.Generic.List[string]
-
-        foreach ($gid in $ids) {
-            $gameCounter++
-            if ($gameCounter -gt $MaxGames) {
-                throw "MaxGames limit hit ($MaxGames). Bailing to avoid hammering the API."
-            }
-
-            try {
-                $g = Get-LaneTalkGameDetail -GameId ([long]$gid)
-
-                $finalScore = $null
-                if ($g.scores) { $finalScore = ($g.scores | Select-Object -Last 1) }
-                if ($null -eq $finalScore) { $finalScore = $g.score }
-
-                $startLocal = $null
-                $endLocal   = $null
-                if ($g.startTime) { $startLocal = Convert-FromUnixTime -UnixSeconds ([long]$g.startTime) }
-                if ($g.endTime)   { $endLocal   = Convert-FromUnixTime -UnixSeconds ([long]$g.endTime) }
-
-                # Example: "G1 L23 77 (01/06 19:12 -> 19:31)"
-                if ($startLocal -and $endLocal) {
-                    $laneGames.Add(("G{0} L{1} {2} ({3:MM/dd HH:mm} -> {4:HH:mm})" -f $g.game, $g.lane, $finalScore, $startLocal, $endLocal)) | Out-Null
-                } else {
-                    $laneGames.Add(("G{0} L{1} {2}" -f $g.game, $g.lane, $finalScore)) | Out-Null
-                }
-            } catch {
-                $laneGames.Add(("G? L? (gameId {0} failed)" -f $gid)) | Out-Null
-            }
-
-            if ($SleepMs -gt 0) { Start-Sleep -Milliseconds $SleepMs }
-        }
-
-        [pscustomobject]@{
-            playerName = $c.playerName
-            teamName   = $c.teamName
-            totalScore = $c.totalScore
-            laneGames  = $laneGames -join " | "
-        }
-    }
-
-    $rows |
-        Sort-Object totalScore -Descending |
-        Format-Table -AutoSize
-}
-
-function Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv {
-    [CmdletBinding()]
-    param(
-        [string]$Path = (Join-Path $PWD "lanetalk_last10pages_player_lane_gamescores.csv"),
-
-        # Safety valve: maximum pages to scan (API is newest-first)
-        [int]$MaxPages = 10,
-
-        # Throttle per game-detail request
-        [int]$SleepMs = 25,
-
-        # Safety valve: max game-detail calls across the whole export
-        [int]$MaxGames = 20000
-    )
-
-    $gameCounter = 0
-    $rows = New-Object System.Collections.Generic.List[object]
-
-    for ($page = 1; $page -le $MaxPages; $page++) {
-        $completed = Get-LaneTalkCompleted -Page $page
-        if (-not $completed -or ($completed | Measure-Object).Count -eq 0) {
-            break
-        }
-
-        foreach ($c in $completed) {
-            $ids = @()
-            if ($c.gameIds) { $ids = @($c.gameIds) }
-
-            # Collect lane(s) for that player's games
-            $lanes = New-Object System.Collections.Generic.List[string]
-
-            foreach ($gid in $ids) {
-                $gameCounter++
-                if ($gameCounter -gt $MaxGames) {
-                    throw "MaxGames limit hit ($MaxGames). Bailing to avoid hammering the API."
-                }
-
-                try {
-                    $g = Get-LaneTalkGameDetail -GameId ([long]$gid)
-                    if ($null -ne $g.lane -and "$($g.lane)".Length -gt 0) {
-                        $lanes.Add([string]$g.lane) | Out-Null
-                    }
-                } catch {
-                    # ignore lane fetch failures for export
-                }
-
-                if ($SleepMs -gt 0) { Start-Sleep -Milliseconds $SleepMs }
-            }
-
-            # De-dupe lanes (some games may be same lane)
-            $laneText = ($lanes | Select-Object -Unique) -join ","
-
-            $rows.Add([pscustomobject]@{
-                playerName = $c.playerName
-                lane       = $laneText
-                gameScores = if ($c.gameScores) { @($c.gameScores) -join "," } else { "" }
-                page       = $page
-            }) | Out-Null
-        }
-    }
-
-    $rows | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $Path
-    Write-Host ("Exported last {0} completed page(s) to: {1}" -f $MaxPages, $Path) -ForegroundColor Green
-}
-
-# Back-compat wrapper (old name) — now exports all pages
-function Export-LaneTalkPage1PlayerLaneGameScoresToCsv {
-    [CmdletBinding()]
-    param(
-        [string]$Path = (Join-Path $PWD "lanetalk_allpages_player_lane_gamescores.csv"),
-        [int]$MaxPages = 200,
-        [int]$SleepMs = 25,
-        [int]$MaxGames = 20000
-    )
-
-    Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv -Path $Path -MaxPages $MaxPages -SleepMs $SleepMs -MaxGames $MaxGames
 }
 
 function Format-LaneTalkFrames {
@@ -800,8 +695,49 @@ function Get-LaneTalkLatestGameIdForPlayer {
 }
 
 
+function Resolve-LaneTalkPagesForDate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [datetime]$Since,
+        [int]$MaxPages = 200,
+        [int]$SampleRowsPerPage = 3,
+        [int]$SleepMs = 25
+    )
 
+    for ($page = 1; $page -le $MaxPages; $page++) {
+        $completed = Get-LaneTalkCompleted -Page $page
+        if (-not $completed -or ($completed | Measure-Object).Count -eq 0) { return $page }
 
+        $rows = @($completed)
+        $take = [Math]::Min($SampleRowsPerPage, $rows.Count)
+        $sample = @($rows | Select-Object -Last $take)
+
+        $oldest = $null
+
+        foreach ($c in $sample) {
+            if (-not $c.gameIds -or @($c.gameIds).Count -eq 0) { continue }
+            $gid = [long](@($c.gameIds)[0])
+
+            try {
+                $g = Get-LaneTalkGameDetail -GameId $gid
+                if ($g.startTime) {
+                    $dt = Convert-FromUnixTime -UnixSeconds ([long]$g.startTime)
+                    if ($dt) {
+                        if ($null -eq $oldest -or $dt -lt $oldest) { $oldest = $dt }
+                    }
+                }
+            } catch { }
+
+            if ($SleepMs -gt 0) { Start-Sleep -Milliseconds $SleepMs }
+        }
+
+        if ($null -eq $oldest) { continue }
+        if ($oldest -lt $Since) { return $page }
+    }
+
+    return $MaxPages
+}
 
 function Start-LaneTalkMenu {
     while ($true) {
@@ -829,30 +765,34 @@ function Start-LaneTalkMenu {
         }
 
         Write-Host ""
-        Write-Host " 1) One-shot scoreboard (Page 1)"
-        Write-Host " 2) Search bowler and pick a game (scoreboard)"
-        Write-Host " 3) Export last 10 pages (playerName,lane,gameScores) to CSV"
+        Write-Host " 1) Search bowler and pick a game (scoreboard)"
         Write-Host " 0) Exit"
         Write-Host ""
 
         $choice = Read-Host "Select option"
         switch ($choice) {
-            "1" { Show-LaneTalkHydratedScoreboardOnce -Page 1 -SleepMs 25 -MaxGames 5000 }
-            "2" {
-                $search = Read-Host "Search bowler name (type ? to list all)"
-                if ([string]::IsNullOrWhiteSpace($search)) {
+            "1" {
+                $input = Read-Host "Search bowler (? for all, optional @YYYY-MM-DD e.g. john@2025-12-01)"
+                if ([string]::IsNullOrWhiteSpace($input)) {
                     Write-Warning "Search was empty."
                 } else {
-                    Show-LaneTalkPlayerGamePicker -Search $search
-                }
-            }
-            "3" {
-                $default = Join-Path $PWD "lanetalk_last10pages_player_lane_gamescores.csv"
-                $path = Read-Host "CSV output path (Enter for default: $default)"
-                if ([string]::IsNullOrWhiteSpace($path)) { $path = $default }
+                    $search = $input.Trim()
+                    $pages  = 5
 
-                # Default: last 10 pages. Advanced users can edit MaxPages in the script if needed.
-                Export-LaneTalkAllPagesPlayerLaneGameScoresToCsv -Path $path -MaxPages 10 -SleepMs 25 -MaxGames 20000
+                    # Optional: name@YYYY-MM-DD
+                    if ($search -match "^(?<q>.+?)@(?<d>\d{4}-\d{2}-\d{2})$") {
+                        $search = $Matches.q.Trim()
+                        try {
+                            $since = [datetime]::ParseExact($Matches.d, "yyyy-MM-dd", $null)
+                            $pages = Resolve-LaneTalkPagesForDate -Since $since -MaxPages 200 -SampleRowsPerPage 3 -SleepMs 25
+                        } catch {
+                            Write-Warning "Couldn't parse date. Use YYYY-MM-DD."
+                            $pages = 5
+                        }
+                    }
+
+                    Show-LaneTalkPlayerGamePicker -Search $search -SearchPages $pages -GamesPages $pages -MaxListGames 20
+                }
             }
             "0" { return }
             default { Write-Warning "Unknown option: $choice" }
