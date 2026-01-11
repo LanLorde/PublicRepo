@@ -23,7 +23,7 @@ param(
 
     [Parameter()][ValidateRange(1,20)][int]$MaxGameColumns = 6,
 
-    [Parameter()][string]$OutPath = (Join-Path $PWD "lanetalk_completed_only.csv"),
+    [Parameter()][string]$OutPath = (Join-Path $PWD "lanetalk_games.csv"),
 
     [Parameter()][ValidateRange(5,120)][int]$HttpTimeoutSec = 30
 )
@@ -75,7 +75,6 @@ for ($page = 1; $page -le $Pages; $page++) {
 
         $row = [ordered]@{
             playerName = $c.playerName
-            page       = $page
         }
 
         for ($i = 0; $i -lt $MaxGameColumns; $i++) {
