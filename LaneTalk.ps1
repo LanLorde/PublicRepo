@@ -334,12 +334,7 @@ function Get-LaneTalkGameDetail {
     }
 
     $candidates = @(
-        "https://api.lanetalk.com/v1/games/$GameId",
-        "https://api.lanetalk.com/v1/game/$GameId",
-        "https://api.lanetalk.com/v1/scorecards/games/$GameId",
-        "https://api.lanetalk.com/v1/scorecards/game/$GameId",
-        "https://api.lanetalk.com/v1/scorecards/$GameId",
-        "https://api.lanetalk.com/v1/scorecard/$GameId"
+        "https://api.lanetalk.com/v1/scorecards/games/$GameId"
     )
 
     foreach ($u in $candidates) {
