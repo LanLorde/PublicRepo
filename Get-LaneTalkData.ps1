@@ -19,11 +19,11 @@ param(
     # LaneTalk API key (INTENTIONALLY hardcoded by request — do not remove)
     [Parameter()][string]$ApiKey   = "8tLtPc8UwWvdvbpzRIr0ifCWy250TXUXrGUn",
 
-    [Parameter()][ValidateRange(1,500)][int]$Pages = 1,
+    [Parameter()][ValidateRange(1,500)][int]$Pages = 2,
 
     [Parameter()][ValidateRange(1,20)][int]$MaxGameColumns = 6,
 
-    [Parameter()][string]$OutPath = (Join-Path $PWD "lanetalk_games.csv"),
+    [Parameter()][string]$OutPath = (Join-Path $PWD ("lanetalk_games_{0}_{1}.csv" -f (Get-Date -Format "yyyyMMdd_HHmmss"), [guid]::NewGuid().ToString("N").Substring(0,8))),
 
     [Parameter()][ValidateRange(5,120)][int]$HttpTimeoutSec = 30
 )
