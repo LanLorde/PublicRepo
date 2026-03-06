@@ -1,0 +1,6 @@
+[ClassVersion("1.0.0"), FriendlyName("IntunePolicy")]
+class MSFT_IntunePolicy : OMI_BaseResource
+{
+    [Key] string PolicyPath;
+    [Write, ValueMap{"Present"}, Values{"Present"}] string Ensure;
+};
