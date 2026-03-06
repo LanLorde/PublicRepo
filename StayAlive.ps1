@@ -11,14 +11,14 @@ function Initialize-ConsoleEncoding {
     [Console]::OutputEncoding = $utf8NoBom
     [Console]::InputEncoding = $utf8NoBom
   } catch {
-    # Ignore hosts that do not allow changing console encoding.
+    Write-Verbose "Could not set console UTF-8 encoding in this host: $($_.Exception.Message)"
   }
 
   if ($PSVersionTable.PSEdition -eq 'Desktop') {
     try {
       chcp.com 65001 > $null
     } catch {
-      # Ignore if code page cannot be changed.
+      Write-Verbose "Could not switch console code page to 65001: $($_.Exception.Message)"
     }
   }
 }
@@ -168,10 +168,12 @@ $birdFramesUnicode = @(
 )
 
 
+$sendKeysAvailable = $false
 try {
   Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+  $sendKeysAvailable = $true
 } catch {
-  throw "System.Windows.Forms is required for SendKeys but could not be loaded: $($_.Exception.Message)"
+  Write-Warning "System.Windows.Forms is unavailable; keep-awake keystroke sending is disabled."
 }
 $con=$host.UI.RawUI
 $con.WindowTitle="Running Staying Alive, to kill close window or press CTRL + 'C'"
@@ -189,9 +191,11 @@ While ($true) {
     Start-Sleep -Milliseconds 250 -ErrorAction SilentlyContinue
   }
   Start-Sleep -Seconds 30 -ErrorAction SilentlyContinue
-  try {
-    [System.Windows.Forms.SendKeys]::SendWait("^")
-  } catch {
-    Write-Verbose "SendKeys failed in this host: $($_.Exception.Message)"
+  if ($sendKeysAvailable) {
+    try {
+      [System.Windows.Forms.SendKeys]::SendWait("^")
+    } catch {
+      Write-Verbose "SendKeys failed in this host: $($_.Exception.Message)"
+    }
   }
 }
