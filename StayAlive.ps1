@@ -24,6 +24,7 @@ function Initialize-ConsoleEncoding {
 }
 
 Initialize-ConsoleEncoding
+$isLegacyWindowsPowerShell = ($PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -lt 6)
 
 $sceneAscii = @"
   ____________________        ________________________________________________
@@ -167,10 +168,20 @@ $birdFramesUnicode = @(
 )
 
 
-Add-Type -AssemblyName System.Windows.Forms
+try {
+  Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+} catch {
+  throw "System.Windows.Forms is required for SendKeys but could not be loaded: $($_.Exception.Message)"
+}
 $con=$host.UI.RawUI
 $con.WindowTitle="Running Staying Alive, to kill close window or press CTRL + 'C'"
-$birdFrames = if ($UseUnicode -and -not $UseAscii) { $birdFramesUnicode } else { $birdFramesAscii }
+
+if ($UseUnicode -and $isLegacyWindowsPowerShell) {
+  Write-Warning "Unicode mode is not reliable in Windows PowerShell 5.1. Falling back to ASCII."
+}
+
+$useUnicodeRuntime = ($UseUnicode -and -not $UseAscii -and -not $isLegacyWindowsPowerShell)
+$birdFrames = if ($useUnicodeRuntime) { $birdFramesUnicode } else { $birdFramesAscii }
 While ($true) {
   foreach ($frame in $birdFrames) {
     Clear-Host
@@ -178,5 +189,9 @@ While ($true) {
     Start-Sleep -Milliseconds 250 -ErrorAction SilentlyContinue
   }
   Start-Sleep -Seconds 30 -ErrorAction SilentlyContinue
-  [System.Windows.Forms.SendKeys]::SendWait("^")
+  try {
+    [System.Windows.Forms.SendKeys]::SendWait("^")
+  } catch {
+    Write-Verbose "SendKeys failed in this host: $($_.Exception.Message)"
+  }
 }
