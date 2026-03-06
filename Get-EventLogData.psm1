@@ -1,4 +1,3 @@
-
 function Get-EventLogData {
     <#
     .SYNOPSIS
@@ -93,4 +92,3 @@ function Get-EventLogData {
 
     return $events
 }
-
