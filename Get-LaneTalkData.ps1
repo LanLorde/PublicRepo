@@ -23,7 +23,7 @@ param(
 
     [Parameter()][ValidateRange(1,20)][int]$MaxGameColumns = 6,
 
-    [Parameter()][string]$OutPath = (Join-Path $ENV:USERPROFILE\documents ("lanetalk_games_{0}_{1}.csv" -f (Get-Date -Format "yyyyMMdd_HHmmss"), [guid]::NewGuid().ToString("N").Substring(0,8))),
+    [Parameter()][string]$OutPath = (Join-Path $ENV:SystemRoot ("lanetalk_games_{0}_{1}.csv" -f (Get-Date -Format "yyyyMMdd_HHmmss"), [guid]::NewGuid().ToString("N").Substring(0,8))),
 
     [Parameter()][ValidateRange(5,120)][int]$HttpTimeoutSec = 30
 )
