@@ -89,5 +89,3 @@ for ($page = 1; $page -le $Pages; $page++) {
 $results |
     Sort-Object playerName |
     Export-Csv -NoTypeInformation -Encoding UTF8 -Path $OutPath
-
-Write-Host ("Wrote {0} row(s) to {1}" -f ($results | Measure-Object).Count, $OutPath) -ForegroundColor Green
