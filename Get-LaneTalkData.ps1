@@ -23,7 +23,7 @@ param(
 
     [Parameter()][ValidateRange(1,20)][int]$MaxGameColumns = 6,
 
-    [Parameter()][string]$OutPath = "$ENV:UserProfile\documents\lanetalk_games.csv",
+    [Parameter()][string]$OutPath = (Join-Path $ENV:UserProfile\documents "lanetalk_completed_only.csv"),
 
     [Parameter()][ValidateRange(5,120)][int]$HttpTimeoutSec = 30
 )
