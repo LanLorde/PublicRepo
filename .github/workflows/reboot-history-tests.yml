@@ -1,0 +1,29 @@
+name: Reboot history tests
+on:
+  push:
+    paths:
+      - Get-RebootHistory.ps1
+      - tests/Get-RebootHistory.Tests.ps1
+      - .github/workflows/reboot-history-tests.yml
+  pull_request:
+    paths:
+      - Get-RebootHistory.ps1
+      - tests/Get-RebootHistory.Tests.ps1
+      - .github/workflows/reboot-history-tests.yml
+permissions:
+  contents: read
+jobs:
+  windows-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Test reboot history
+        shell: powershell
+        run: ./tests/Get-RebootHistory.Tests.ps1
+  powershell-7:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Test reboot history
+        shell: pwsh
+        run: ./tests/Get-RebootHistory.Tests.ps1
